@@ -1,6 +1,6 @@
 module Nokogiri
   # The version of Nokogiri you are using
-  VERSION = '1.6.0'
+  VERSION = '1.6.6.2'
 
   class VersionInfo # :nodoc:
     def jruby?
@@ -12,7 +12,7 @@ module Nokogiri
     end
 
     def loaded_parser_version
-      LIBXML_PARSER_VERSION.scan(/^(.*)(..)(..)$/).first.collect{ |j|
+      LIBXML_PARSER_VERSION.scan(/^(\d+)(\d\d)(\d\d)(?!\d)/).first.collect{ |j|
         j.to_i
       }.join(".")
     end
@@ -61,6 +61,8 @@ module Nokogiri
           hash_info['libxml']['source']  = "packaged"
           hash_info['libxml']['libxml2_path'] = NOKOGIRI_LIBXML2_PATH
           hash_info['libxml']['libxslt_path'] = NOKOGIRI_LIBXSLT_PATH
+          hash_info['libxml']['libxml2_patches'] = NOKOGIRI_LIBXML2_PATCHES
+          hash_info['libxml']['libxslt_patches'] = NOKOGIRI_LIBXSLT_PATCHES
         else
           hash_info['libxml']['source']  = "system"
         end

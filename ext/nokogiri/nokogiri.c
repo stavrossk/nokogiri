@@ -14,7 +14,12 @@ VALUE mNokogiriHtmlSax ;
  */
 int vasprintf (char **strp, const char *fmt, va_list ap)
 {
-  int len = vsnprintf (NULL, 0, fmt, ap) + 1;
+  /* Mingw32/64 have a broken vsnprintf implementation that fails when
+   * using a zero-byte limit in order to retrieve the required size for malloc.
+   * So we use a one byte buffer instead.
+   */
+  char tmp[1];
+  int len = vsnprintf (tmp, 1, fmt, ap) + 1;
   char *res = (char *)malloc((unsigned int)len);
   if (res == NULL)
       return -1;
@@ -94,10 +99,14 @@ void Init_nokogiri()
   rb_const_set(mNokogiri, rb_intern("NOKOGIRI_USE_PACKAGED_LIBRARIES"), Qtrue);
   rb_const_set(mNokogiri, rb_intern("NOKOGIRI_LIBXML2_PATH"), NOKOGIRI_STR_NEW2(NOKOGIRI_LIBXML2_PATH));
   rb_const_set(mNokogiri, rb_intern("NOKOGIRI_LIBXSLT_PATH"), NOKOGIRI_STR_NEW2(NOKOGIRI_LIBXSLT_PATH));
+  rb_const_set(mNokogiri, rb_intern("NOKOGIRI_LIBXML2_PATCHES"), rb_str_split(NOKOGIRI_STR_NEW2(NOKOGIRI_LIBXML2_PATCHES), " "));
+  rb_const_set(mNokogiri, rb_intern("NOKOGIRI_LIBXSLT_PATCHES"), rb_str_split(NOKOGIRI_STR_NEW2(NOKOGIRI_LIBXSLT_PATCHES), " "));
 #else
   rb_const_set(mNokogiri, rb_intern("NOKOGIRI_USE_PACKAGED_LIBRARIES"), Qfalse);
   rb_const_set(mNokogiri, rb_intern("NOKOGIRI_LIBXML2_PATH"), Qnil);
   rb_const_set(mNokogiri, rb_intern("NOKOGIRI_LIBXSLT_PATH"), Qnil);
+  rb_const_set(mNokogiri, rb_intern("NOKOGIRI_LIBXML2_PATCHES"), Qnil);
+  rb_const_set(mNokogiri, rb_intern("NOKOGIRI_LIBXSLT_PATCHES"), Qnil);
 #endif
 
 #ifdef LIBXML_ICONV_ENABLED

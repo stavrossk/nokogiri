@@ -5,8 +5,8 @@ module Nokogiri
     # XML documents.  The Document is created by parsing an XML document.
     # See Nokogiri::XML::Document.parse() for more information on parsing.
     #
-    # For searching a Document, see Nokogiri::XML::Node#css and
-    # Nokogiri::XML::Node#xpath
+    # For searching a Document, see Nokogiri::XML::Searchable#css and
+    # Nokogiri::XML::Searchable#xpath
     #
     class Document < Nokogiri::XML::Node
       # I'm ignoring unicode characters here.
@@ -45,7 +45,7 @@ module Nokogiri
         # Give the options to the user
         yield options if block_given?
 
-        return new if empty_doc?(string_or_io)
+        return new if !options.strict? && empty_doc?(string_or_io)
 
         doc = if string_or_io.respond_to?(:read)
           url ||= string_or_io.respond_to?(:path) ? string_or_io.path : nil
@@ -233,7 +233,7 @@ module Nokogiri
       undef_method :namespace_definitions, :line, :add_namespace
 
       def add_child node_or_tags
-        raise "Document already has a root node" if root
+        raise "Document already has a root node" if root && root.name != 'nokogiri_text_wrapper'
         node_or_tags = coerce(node_or_tags)
         if node_or_tags.is_a?(XML::NodeSet)
           raise "Document cannot have multiple root nodes" if node_or_tags.size > 1
@@ -267,8 +267,8 @@ module Nokogiri
           (string_or_io.respond_to?(:eof?) && string_or_io.eof?)
       end
 
-      def implied_xpath_context
-        "/"
+      def implied_xpath_contexts # :nodoc:
+        ["//"]
       end
 
       def inspect_attributes

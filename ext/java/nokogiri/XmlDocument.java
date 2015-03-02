@@ -1,7 +1,7 @@
 /**
  * (The MIT License)
  *
- * Copyright (c) 2008 - 2011:
+ * Copyright (c) 2008 - 2014:
  *
  * * {Aaron Patterson}[http://tenderlovemaking.com]
  * * {Mike Dalessio}[http://mike.daless.io]
@@ -17,10 +17,10 @@
  * distribute, sublicense, and/or sell copies of the Software, and to
  * permit persons to whom the Software is furnished to do so, subject to
  * the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be
  * included in all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
  * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
  * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
@@ -32,12 +32,14 @@
 
 package nokogiri;
 
+import static nokogiri.internals.NokogiriHelpers.clearXpathContext;
 import static nokogiri.internals.NokogiriHelpers.getCachedNodeOrCreate;
 import static nokogiri.internals.NokogiriHelpers.getNokogiriClass;
 import static nokogiri.internals.NokogiriHelpers.isNamespace;
 import static nokogiri.internals.NokogiriHelpers.rubyStringToString;
 import static nokogiri.internals.NokogiriHelpers.stringOrNil;
 
+import java.io.UnsupportedEncodingException;
 import java.util.List;
 
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -47,13 +49,15 @@ import nokogiri.internals.NokogiriHelpers;
 import nokogiri.internals.NokogiriNamespaceCache;
 import nokogiri.internals.SaveContextVisitor;
 import nokogiri.internals.XmlDomParserContext;
+import nokogiri.internals.c14n.CanonicalFilter;
+import nokogiri.internals.c14n.CanonicalizationException;
+import nokogiri.internals.c14n.Canonicalizer;
 
 import org.jruby.Ruby;
 import org.jruby.RubyArray;
 import org.jruby.RubyClass;
 import org.jruby.RubyFixnum;
 import org.jruby.RubyNil;
-import org.jruby.RubyString;
 import org.jruby.anno.JRubyClass;
 import org.jruby.anno.JRubyMethod;
 import org.jruby.javasupport.JavaUtil;
@@ -74,17 +78,18 @@ import org.w3c.dom.NodeList;
  *
  * @author sergio
  * @author Yoko Harada <yokolet@gmail.com>
+ * @author John Shahid <jvshahid@gmail.com>
  */
 
 @JRubyClass(name="Nokogiri::XML::Document", parent="Nokogiri::XML::Node")
 public class XmlDocument extends XmlNode {
     private NokogiriNamespaceCache nsCache;
-    
+
     /* UserData keys for storing extra info in the document node. */
     public final static String DTD_RAW_DOCUMENT = "DTD_RAW_DOCUMENT";
     public final static String DTD_INTERNAL_SUBSET = "DTD_INTERNAL_SUBSET";
     public final static String DTD_EXTERNAL_SUBSET = "DTD_EXTERNAL_SUBSET";
-    
+
     /* DocumentBuilderFactory implementation class name. This needs to set a classloader into it.
      * Setting an appropriate classloader resolves issue 380.
      */
@@ -100,7 +105,7 @@ public class XmlDocument extends XmlNode {
     public XmlDocument(Ruby ruby, RubyClass klazz) {
         super(ruby, klazz, createNewDocument());
     }
-    
+
     public XmlDocument(Ruby ruby, Document document) {
         this(ruby, getNokogiriClass(ruby, "Nokogiri::XML::Document"), document);
     }
@@ -112,7 +117,7 @@ public class XmlDocument extends XmlNode {
         stabilizeTextContent(document);
         setInstanceVariable("@decorators", ruby.getNil());
     }
-    
+
     public void setDocumentNode(ThreadContext context, Node node) {
         super.setNode(context, node);
         initializeNamespaceCacheIfNecessary();
@@ -128,11 +133,11 @@ public class XmlDocument extends XmlNode {
     public void setEncoding(IRubyObject encoding) {
         this.encoding = encoding;
     }
-    
+
     public IRubyObject getEncoding() {
         return encoding;
     }
-    
+
     // not sure, but like attribute values, text value will be lost
     // unless it is referred once before this document is used.
     // this seems to happen only when the fragment is parsed from Node#in_context.
@@ -164,7 +169,7 @@ public class XmlDocument extends XmlNode {
             createAndCacheNamespaces(ruby, children.item(i));
         }
     }
-    
+
     // When a document is created from fragment with a context (reference) document,
     // namespace should be resolved based on the context document.
     public XmlDocument(Ruby ruby, RubyClass klass, Document document, XmlDocument contextDoc) {
@@ -174,14 +179,14 @@ public class XmlDocument extends XmlNode {
         String default_href = rubyStringToString(default_ns.href(ruby.getCurrentContext()));
         resolveNamespaceIfNecessary(ruby.getCurrentContext(), document.getDocumentElement(), default_href);
     }
-    
+
     private void resolveNamespaceIfNecessary(ThreadContext context, Node node, String default_href) {
         if (node == null) return;
         String nodePrefix = node.getPrefix();
         if (nodePrefix == null) { // default namespace
             NokogiriHelpers.renameNode(node, default_href, node.getNodeName());
         } else {
-            XmlNamespace xmlNamespace = nsCache.get(nodePrefix);
+            XmlNamespace xmlNamespace = nsCache.get(node, nodePrefix);
             String href = rubyStringToString(xmlNamespace.href(context));
             NokogiriHelpers.renameNode(node, href, node.getNodeName());
         }
@@ -189,17 +194,17 @@ public class XmlDocument extends XmlNode {
         NodeList children = node.getChildNodes();
         for (int i=0; i<children.getLength(); i++) {
             resolveNamespaceIfNecessary(context, children.item(i), default_href);
-        }   
+        }
     }
 
     public NokogiriNamespaceCache getNamespaceCache() {
         return nsCache;
     }
-    
+
     public void initializeNamespaceCacheIfNecessary() {
         if (nsCache == null) nsCache = new NokogiriNamespaceCache();
     }
-    
+
     public void setNamespaceCache(NokogiriNamespaceCache nsCache) {
         this.nsCache = nsCache;
     }
@@ -207,7 +212,7 @@ public class XmlDocument extends XmlNode {
     public Document getDocument() {
         return (Document) node;
     }
-    
+
     @Override
     protected IRubyObject getNodeName(ThreadContext context) {
         if (name == null) name = context.getRuntime().newString("document");
@@ -263,7 +268,7 @@ public class XmlDocument extends XmlNode {
 
         return xmlDocument;
     }
-    
+
     @JRubyMethod(required=1, optional=4)
     public IRubyObject create_entity(ThreadContext context, IRubyObject[] argv) {
         // FIXME: Entity node should be create by some right way.
@@ -346,14 +351,15 @@ public class XmlDocument extends XmlNode {
                            getNokogiriClass(context.getRuntime(), "Nokogiri::XML::Document"),
                            args);
     }
-    
+
     @JRubyMethod(name="remove_namespaces!")
     public IRubyObject remove_namespaces(ThreadContext context) {
         removeNamespceRecursively(context, this);
         nsCache.clear();
+        clearXpathContext(getNode());
         return this;
     }
-    
+
     private void removeNamespceRecursively(ThreadContext context, XmlNode xmlNode) {
         Node node = xmlNode.node;
         if (node.getNodeType() == Node.ELEMENT_NODE) {
@@ -395,7 +401,7 @@ public class XmlDocument extends XmlNode {
     @JRubyMethod(name="root=")
     public IRubyObject root_set(ThreadContext context, IRubyObject newRoot_) {
         // in case of document fragment, temporary root node should be deleted.
-        
+
         // Java can't have a root whose value is null. Instead of setting null,
         // the method sets user data so that other methods are able to know the root
         // should be nil.
@@ -444,11 +450,22 @@ public class XmlDocument extends XmlNode {
                 dtd = XmlDtd.newFromInternalSubset(context.getRuntime(), document);
             } else if (document.getDoctype() != null) {
                 DocumentType docType = document.getDoctype();
+                IRubyObject name, publicId, systemId;
+                name = publicId = systemId = context.getRuntime().getNil();
+                if (docType.getName() != null) {
+                    name = context.getRuntime().newString(docType.getName());
+                }
+                if (docType.getPublicId() != null) {
+                    publicId = context.getRuntime().newString(docType.getPublicId());
+                }
+                if (docType.getSystemId() != null) {
+                    systemId = context.getRuntime().newString(docType.getSystemId());
+                }
                 dtd = XmlDtd.newEmpty(context.getRuntime(),
                                       document,
-                                      context.getRuntime().newString(docType.getName()),
-                                      context.getRuntime().newString(docType.getPublicId()),
-                                      context.getRuntime().newString(docType.getSystemId()));
+                                      name,
+                                      publicId,
+                                      systemId);
             } else {
                 dtd = context.getRuntime().getNil();
             }
@@ -531,7 +548,7 @@ public class XmlDocument extends XmlNode {
         }
         visitor.leave(document);
     }
-    
+
     @JRubyMethod(meta=true)
     public static IRubyObject wrapJavaDocument(ThreadContext context, IRubyObject klazz, IRubyObject arg) {
         XmlDocument xmlDocument = (XmlDocument) NokogiriService.XML_DOCUMENT_ALLOCATOR.allocate(context.getRuntime(), getNokogiriClass(context.getRuntime(), "Nokogiri::XML::Document"));
@@ -540,53 +557,80 @@ public class XmlDocument extends XmlNode {
         xmlDocument.setDocumentNode(context, document);
         return xmlDocument;
     }
-    
+
     @JRubyMethod
     public IRubyObject toJavaDocument(ThreadContext context) {
-        return JavaUtil.convertJavaToUsableRubyObject(context.getRuntime(), (org.w3c.dom.Document)node);
+        return JavaUtil.convertJavaToUsableRubyObject(context.getRuntime(), node);
     }
-    
+
     /* call-seq:
      *  doc.canonicalize(mode=XML_C14N_1_0,inclusive_namespaces=nil,with_comments=false)
      *  doc.canonicalize { |obj, parent| ... }
      *
      * Canonicalize a document and return the results.  Takes an optional block
-     * that takes two parameters: the +obj+ and that node's +parent+.  
+     * that takes two parameters: the +obj+ and that node's +parent+.
      * The  +obj+ will be either a Nokogiri::XML::Node, or a Nokogiri::XML::Namespace
-     * The block must return a non-nil, non-false value if the +obj+ passed in 
+     * The block must return a non-nil, non-false value if the +obj+ passed in
      * should be included in the canonicalized document.
      */
     @JRubyMethod(optional=3)
     public IRubyObject canonicalize(ThreadContext context, IRubyObject[] args, Block block) {
-        XmlNode startingNode = getStartingNode(block);
-        int canonicalOpts = 1;
-        int mode = 0;
-        if (args.length == 3) {
-            mode = (Integer)(args[0].isNil() ? 0 : args[0].toJava(Integer.class));
-            if (mode == 1) canonicalOpts = canonicalOpts | 16; // exclusive
-            // inclusive prefix list for exclusive c14n
-            canonicalOpts = args[2].isTrue() ? (canonicalOpts | 4) : canonicalOpts;
+        Integer mode = 0;
+        String inclusive_namespace = null;
+        Boolean with_comments = false;
+        if (args.length > 0 && !(args[0].isNil())) {
+            mode = RubyFixnum.fix2int(args[0]);
         }
-        if (startingNode != this) canonicalOpts = canonicalOpts | 8; // subsets
-        // 38 = NO_DECL | NO_EMPTY | AS_XML
-        SaveContextVisitor visitor = new SaveContextVisitor(38, null, "UTF-8", false, false, canonicalOpts);
-        if (args.length == 3 && !args[1].isNil()) {
-            visitor.setC14nExclusiveInclusivePrefixes((List<String>)NokogiriHelpers.rubyStringArrayToJavaList((RubyArray)args[1]));
-        }
-        startingNode.accept(context, visitor);
-        Ruby runtime = context.getRuntime();
-        IRubyObject result = runtime.getTrue();
-        if (block.isGiven()) {
-            List<Node> list = visitor.getC14nNodeList();
-            for (Node n : list) {
-                IRubyObject currentNode = getCachedNodeOrCreate(runtime, n);
-                IRubyObject parentNode = getCachedNodeOrCreate(runtime, n.getParentNode());
-                result = block.call(context, currentNode, parentNode);
+        if (args.length > 1 ) {
+            if (!args[1].isNil() && !(args[1] instanceof List)) {
+                throw context.getRuntime().newTypeError("Expected array");
+            }
+            if (!args[1].isNil()) {
+              inclusive_namespace = (String)((RubyArray)args[1])
+                .join(context, context.getRuntime().newString(" "))
+                .asString()
+                .asJavaString(); // OMG I wish I knew JRuby better, this is ugly
             }
         }
-        return result.isTrue() ? stringOrNil(runtime, visitor.toString()) : RubyString.newEmptyString(runtime);
+        if (args.length > 2) {
+            with_comments = args[2].isTrue();
+        }
+        String algorithmURI = null;
+        switch(mode) {
+        case 0:  // XML_C14N_1_0
+            if (with_comments) algorithmURI = Canonicalizer.ALGO_ID_C14N_WITH_COMMENTS;
+            else algorithmURI = Canonicalizer.ALGO_ID_C14N_OMIT_COMMENTS;
+            break;
+        case 1:  // XML_C14N_EXCLUSIVE_1_0
+            if (with_comments) algorithmURI = Canonicalizer.ALGO_ID_C14N_EXCL_WITH_COMMENTS;
+            else algorithmURI = Canonicalizer.ALGO_ID_C14N_EXCL_OMIT_COMMENTS;
+            break;
+        case 2: // XML_C14N_1_1 = 2
+            if (with_comments) algorithmURI = Canonicalizer.ALGO_ID_C14N11_WITH_COMMENTS;
+            else algorithmURI = Canonicalizer.ALGO_ID_C14N11_OMIT_COMMENTS;
+        }
+        try {
+            Canonicalizer canonicalizer = Canonicalizer.getInstance(algorithmURI);
+            XmlNode startingNode = getStartingNode(block);
+            byte[] result;
+            CanonicalFilter filter = new CanonicalFilter(context, block);
+            if (inclusive_namespace == null) {
+                result = canonicalizer.canonicalizeSubtree(startingNode.getNode(), filter);
+            } else {
+                result = canonicalizer.canonicalizeSubtree(startingNode.getNode(), inclusive_namespace, filter);
+            }
+            String resultString = new String(result, "UTF-8");
+            return stringOrNil(context.getRuntime(), resultString);
+        } catch (CanonicalizationException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        } catch (UnsupportedEncodingException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+        return context.getRuntime().getNil();
     }
-    
+
     private XmlNode getStartingNode(Block block) {
         if (block.isGiven()) {
             if (block.getBinding().getSelf() instanceof XmlNode) {

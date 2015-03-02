@@ -26,6 +26,13 @@ module Nokogiri
         assert doc.root
       end
 
+      # issue #1005
+      def test_strict_parsing_empty_doc_should_raise_exception
+        assert_raises(SyntaxError) do
+          Nokogiri::XML(StringIO.new('')) { |c| c.strict }
+        end
+      end
+
       # issue #838
       def test_document_with_invalid_prolog
         doc = Nokogiri::XML '<? ?>'
@@ -47,7 +54,7 @@ module Nokogiri
         root << txt
         root << ent
         d << root
-        assert_match /&#8217;/, d.to_html
+        assert_match(/&#8217;/, d.to_html)
       end
 
       def test_document_with_initial_space
@@ -58,6 +65,40 @@ module Nokogiri
       def test_root_set_to_nil
         @xml.root = nil
         assert_equal nil, @xml.root
+      end
+
+      def test_million_laugh_attach
+        doc = Nokogiri::XML '<?xml version="1.0"?>
+<!DOCTYPE lolz [
+<!ENTITY lol "lol">
+<!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+<!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+<!ENTITY lol4 "&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;">
+<!ENTITY lol5 "&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;">
+<!ENTITY lol6 "&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;">
+<!ENTITY lol7 "&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;">
+<!ENTITY lol8 "&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;">
+<!ENTITY lol9 "&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;">
+]>
+<lolz>&lol9;</lolz>'
+        assert_not_nil doc
+      end
+
+      def test_million_laugh_attach_2
+        doc = Nokogiri::XML '<?xml version="1.0" encoding="UTF-8"?>
+ <!DOCTYPE member [
+   <!ENTITY a "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">
+   <!ENTITY b "&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;">
+   <!ENTITY c "&d;&d;&d;&d;&d;&d;&d;&d;&d;&d;">
+   <!ENTITY d "&e;&e;&e;&e;&e;&e;&e;&e;&e;&e;">
+   <!ENTITY e "&f;&f;&f;&f;&f;&f;&f;&f;&f;&f;">
+   <!ENTITY f "&g;&g;&g;&g;&g;&g;&g;&g;&g;&g;">
+   <!ENTITY g "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+ ]>
+ <member>
+ &a;
+ </member>'
+        assert_not_nil doc
       end
 
       def test_ignore_unknown_namespace
@@ -303,6 +344,51 @@ module Nokogiri
         assert_equal "quack!", doc.root.children.first.content
       end
 
+      def test_prepend
+        doc = Nokogiri::XML('<root>')
+
+        node_set = doc.root.prepend_child '<branch/>'
+        assert_equal %w[branch], node_set.map(&:name)
+
+        branch = doc.at('//branch')
+
+        leaves = %w[leaf1 leaf2 leaf3]
+        leaves.each { |name|
+          branch.prepend_child('<%s/>' % name)
+        }
+        assert_equal leaves.length, branch.children.length
+        assert_equal leaves.reverse, branch.children.map(&:name)
+      end
+
+      def test_prepend_child_fragment_with_single_node
+        doc = Nokogiri::XML::Document.new
+        fragment = doc.fragment('<hello />')
+        doc.prepend_child fragment
+        assert_equal '/hello', doc.at('//hello').path
+        assert_equal 'hello', doc.root.name
+      end
+
+      def test_prepend_child_fragment_with_multiple_nodes
+        doc = Nokogiri::XML::Document.new
+        fragment = doc.fragment('<hello /><goodbye />')
+        assert_raises(RuntimeError) do
+          doc.prepend_child fragment
+        end
+      end
+
+      def test_prepend_child_with_multiple_roots
+        assert_raises(RuntimeError) do
+          @xml.prepend_child Node.new('foo', @xml)
+        end
+      end
+
+      def test_prepend_child_with_string
+        doc = Nokogiri::XML::Document.new
+        doc.prepend_child "<div>quack!</div>"
+        assert_equal 1, doc.root.children.length
+        assert_equal "quack!", doc.root.children.first.content
+      end
+
       def test_move_root_to_document_with_no_root
         sender = Nokogiri::XML('<root>foo</root>')
         newdoc = Nokogiri::XML::Document.new
@@ -449,6 +535,12 @@ module Nokogiri
         }
       end
 
+      def test_xpath_syntax_error
+        assert_raises(Nokogiri::XML::XPath::SyntaxError) do
+          @xml.xpath('\\')
+        end
+      end
+
       def test_ancestors
         assert_equal 0, @xml.ancestors.length
       end
@@ -525,6 +617,12 @@ module Nokogiri
         refute_empty doc.errors
       end
 
+      def test_memory_explosion_on_wrong_formatted_element_following_the_root_element
+        doc = Nokogiri::XML("<a/><\n")
+        refute_nil doc
+        refute_empty doc.errors
+      end
+
       def test_document_has_errors
         doc = Nokogiri::XML(<<-eoxml)
           <foo><bar></foo>
@@ -591,6 +689,17 @@ module Nokogiri
         refute_nil doc
       end
 
+      def test_parse_works_with_an_object_that_responds_to_read
+        klass = Class.new do
+          def read *args
+            "<div>foo</div>"
+          end
+        end
+
+        doc = Nokogiri::XML.parse klass.new
+        doc.at_css("div").content.must_equal("foo")
+      end
+
       def test_search_on_empty_documents
         doc = Nokogiri::XML::Document.new
         ns = doc.search('//foo')
@@ -601,6 +710,26 @@ module Nokogiri
 
         ns = doc.xpath('//foo')
         assert_equal 0, ns.length
+      end
+
+      def test_document_search_with_multiple_queries
+        xml = '<document>
+                 <thing>
+                   <div class="title">important thing</div>
+                 </thing>
+                 <thing>
+                   <div class="content">stuff</div>
+                 </thing>
+                 <thing>
+                   <p class="blah">more stuff</div>
+                 </thing>
+               </document>'
+        document = Nokogiri::XML(xml)
+        assert_kind_of Nokogiri::XML::Document, document
+
+        assert_equal 3, document.xpath('.//div', './/p').length
+        assert_equal 3, document.css('.title', '.content', 'p').length
+        assert_equal 3, document.search('.//div', 'p.blah').length
       end
 
       def test_bad_xpath_raises_syntax_error
@@ -734,6 +863,13 @@ module Nokogiri
         assert_equal 1, doc.xpath("//a:foo").length
         assert_equal 1, doc.xpath("//x:foo", "x" => "http://c.flavorjon.es/").length
         assert_match %r{foo c:attr}, doc.to_xml
+        doc.at_xpath("//x:foo", "x" => "http://c.flavorjon.es/").tap do |node|
+          assert_equal nil,          node["attr"]
+          assert_equal "attr-value", node["c:attr"]
+          assert_equal nil,          node.attribute_with_ns("attr", nil)
+          assert_equal "attr-value", node.attribute_with_ns("attr", "http://c.flavorjon.es/").value
+          assert_equal "attr-value", node.attributes["attr"].value
+        end
 
         doc.remove_namespaces!
 
@@ -744,6 +880,13 @@ module Nokogiri
         assert_equal 0, doc.xpath("//a:foo", namespaces).length
         assert_equal 0, doc.xpath("//x:foo", "x" => "http://c.flavorjon.es/").length
         assert_match %r{foo attr}, doc.to_xml
+        doc.at_xpath("//container/foo").tap do |node|
+          assert_equal "attr-value", node["attr"]
+          assert_equal nil,          node["c:attr"]
+          assert_equal "attr-value", node.attribute_with_ns("attr", nil).value
+          assert_equal nil,          node.attribute_with_ns("attr", "http://c.flavorjon.es/")
+          assert_equal "attr-value", node.attributes["attr"].value # doesn't change!
+        end
       end
 
       # issue #785

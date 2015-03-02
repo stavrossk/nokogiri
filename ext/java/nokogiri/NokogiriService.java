@@ -54,16 +54,18 @@ import org.jruby.runtime.load.BasicLibraryService;
  */
 public class NokogiriService implements BasicLibraryService {
     public static final String nokogiriClassCacheGvarName = "$NOKOGIRI_CLASS_CACHE";
-    public static Map<String, RubyClass> nokogiriClassCache;
 
     public boolean basicLoad(Ruby ruby) {
         init(ruby);
-        createNokogiriClassCahce(ruby);
         return true;
     }
-    
-    private static void createNokogiriClassCahce(Ruby ruby) {
-        nokogiriClassCache = Collections.synchronizedMap(new HashMap<String, RubyClass>());
+
+    public static Map<String, RubyClass> getNokogiriClassCache(Ruby ruby) {
+        return (Map<String, RubyClass>) ruby.getModule("Nokogiri").getInternalVariable("cache");
+    }
+
+    private static Map<String, RubyClass> populateNokogiriClassCahce(Ruby ruby) {
+        Map<String, RubyClass> nokogiriClassCache = Collections.synchronizedMap(new HashMap<String, RubyClass>());
         nokogiriClassCache.put("Nokogiri::EncodingHandler", (RubyClass)ruby.getClassFromPath("Nokogiri::EncodingHandler"));
         nokogiriClassCache.put("Nokogiri::HTML::Document", (RubyClass)ruby.getClassFromPath("Nokogiri::HTML::Document"));
         nokogiriClassCache.put("Nokogiri::HTML::ElementDescription", (RubyClass)ruby.getClassFromPath("Nokogiri::HTML::ElementDescription"));
@@ -91,6 +93,7 @@ public class NokogiriService implements BasicLibraryService {
         nokogiriClassCache.put("Nokogiri::XML::AttributeDecl", (RubyClass)ruby.getClassFromPath("Nokogiri::XML::AttributeDecl"));
         nokogiriClassCache.put("Nokogiri::XML::SAX::ParserContext", (RubyClass)ruby.getClassFromPath("Nokogiri::XML::SAX::ParserContext"));
         nokogiriClassCache.put("StringIO", (RubyClass)ruby.getClassFromPath("StringIO"));
+        return nokogiriClassCache;
     }
 
     private void init(Ruby ruby) {
@@ -109,6 +112,7 @@ public class NokogiriService implements BasicLibraryService {
         createDocuments(ruby, xmlModule, htmlModule, xmlNode);
         createSaxModule(ruby, xmlSaxModule, htmlSaxModule);
         createXsltModule(ruby, xsltModule);
+        nokogiri.setInternalVariable("cache", populateNokogiriClassCahce(ruby));
     }
 
     private void createJavaLibraryVersionConstants(Ruby ruby, RubyModule nokogiri) {
@@ -223,6 +227,9 @@ public class NokogiriService implements BasicLibraryService {
         
         RubyClass xmlSaxPushParser = xmlSaxModule.defineClassUnder("PushParser", ruby.getObject(), XML_SAXPUSHPARSER_ALLOCATOR);
         xmlSaxPushParser.defineAnnotatedMethods(XmlSaxPushParser.class);
+        
+        RubyClass htmlSaxPushParser = htmlSaxModule.defineClassUnder("PushParser", ruby.getObject(), HTML_SAXPUSHPARSER_ALLOCATOR);
+        htmlSaxPushParser.defineAnnotatedMethods(HtmlSaxPushParser.class);
         
         RubyClass htmlSaxParserContext = htmlSaxModule.defineClassUnder("ParserContext", xmlSaxParserContext, HTML_SAXPARSER_CONTEXT_ALLOCATOR);
         htmlSaxParserContext.defineAnnotatedMethods(HtmlSaxParserContext.class);
@@ -530,6 +537,12 @@ public class NokogiriService implements BasicLibraryService {
     private static ObjectAllocator XML_SAXPUSHPARSER_ALLOCATOR = new ObjectAllocator() {
         public IRubyObject allocate(Ruby runtime, RubyClass klazz) {
             return new XmlSaxPushParser(runtime, klazz);
+        }
+    };
+    
+    private static ObjectAllocator HTML_SAXPUSHPARSER_ALLOCATOR = new ObjectAllocator() {
+        public IRubyObject allocate(Ruby runtime, RubyClass klazz) {
+            return new HtmlSaxPushParser(runtime, klazz);
         }
     };
 
